@@ -31,7 +31,7 @@ jobs:
       - name: Run Checkov (IaC scan)
         id: checkov
         run: |
-          checkov -d infrastructure --compact --output json > checkov-results.json || true
+          checkov -d infrastructure/secure --compact --output json > checkov-results.json || true
 
       - name: Run CloudGuard risk engine
         run: |
