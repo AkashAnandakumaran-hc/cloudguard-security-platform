@@ -1,68 +1,139 @@
 name: CloudGuard Security Gate
 
-# Shift-left control: any pull request touching infrastructure code
-# is scanned before it can merge. CRITICAL or HIGH findings block
-# the deployment; MEDIUM/LOW are reported but non-blocking.
-
 on:
-  pull_request:
-    paths:
-      - "infrastructure/**"
+  workflow_dispatch:
+
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - "infrastructure/**"
+      - "infrastructure/secure/**"
+      - "automation/**"
+      - ".github/workflows/security-gate.yml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "infrastructure/secure/**"
+      - "automation/**"
+      - ".github/workflows/security-gate.yml"
+
+permissions:
+  contents: read
 
 jobs:
   security-gate:
+    name: Security Gate
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install Checkov
-        run: pip install checkov
-
-      - name: Run Checkov (IaC scan)
-        id: checkov
         run: |
-          checkov -d infrastructure/secure --compact --output json > checkov-results.json || true
+          python -m pip install --upgrade pip
+          python -m pip install checkov==3.3.16
+
+      - name: Run Checkov IaC scan
+        run: |
+          python -m checkov.main \
+            -d infrastructure/secure \
+            --framework terraform \
+            --output json \
+            --soft-fail \
+            > checkov-results.json
+
+      - name: Validate Checkov output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("checkov-results.json")
+
+          if not path.exists() or path.stat().st_size == 0:
+              raise SystemExit("Checkov did not produce a valid results file.")
+
+          with path.open("r", encoding="utf-8") as f:
+              json.load(f)
+
+          print("Checkov JSON validated successfully.")
+          PY
 
       - name: Run CloudGuard risk engine
         run: |
-          python3 automation/risk_engine.py checkov-results.json \
-            --label "PR Scan" \
+          python automation/risk_engine.py \
+            checkov-results.json \
+            --label "CI Scan" \
             --out posture.json \
             --md posture.md
 
-      - name: Upload posture report
+      - name: Upload security reports
         uses: actions/upload-artifact@v4
         with:
-          name: cloudguard-posture-report
+          name: cloudguard-security-reports
           path: |
+            checkov-results.json
             posture.json
             posture.md
 
       - name: Enforce security gate
         run: |
-          python3 - <<'EOF'
-          import json, sys
-          report = json.load(open("posture.json"))
-          crit = report["findings_by_severity"].get("CRITICAL", 0)
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          with open("posture.json", "r", encoding="utf-8") as f:
+              report = json.load(f)
+
+          critical = report["findings_by_severity"].get("CRITICAL", 0)
           high = report["findings_by_severity"].get("HIGH", 0)
+          medium = report["findings_by_severity"].get("MEDIUM", 0)
+          low = report["findings_by_severity"].get("LOW", 0)
           score = report["posture_score"]
 
-          print(f"Posture score: {score}/100")
-          print(f"CRITICAL: {crit}  HIGH: {high}")
+          print("=" * 48)
+          print("CLOUDGUARD - CI/CD SECURITY GATE")
+          print("=" * 48)
+          print(f"Posture Score : {score}/100")
+          print(f"CRITICAL      : {critical}")
+          print(f"HIGH          : {high}")
+          print(f"MEDIUM        : {medium}")
+          print(f"LOW           : {low}")
+          print("-" * 48)
 
-          if crit > 0 or high > 0:
-              print("::error::Security gate FAILED - CRITICAL/HIGH findings must be remediated before merge.")
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as f:
+                  f.write("# CloudGuard Security Gate\n\n")
+                  f.write("| Metric | Result |\n")
+                  f.write("|---|---:|\n")
+                  f.write(f"| Posture Score | **{score}/100** |\n")
+                  f.write(f"| CRITICAL | **{critical}** |\n")
+                  f.write(f"| HIGH | **{high}** |\n")
+                  f.write(f"| MEDIUM | {medium} |\n")
+                  f.write(f"| LOW | {low} |\n\n")
+
+          if critical > 0 or high > 0:
+              print("SECURITY GATE : FAILED")
+              print("CRITICAL or HIGH findings remain.")
+              if summary:
+                  with open(summary, "a", encoding="utf-8") as f:
+                      f.write("## ❌ Security Gate Failed\n")
+                      f.write("CRITICAL or HIGH findings require remediation.\n")
               sys.exit(1)
 
-          print("Security gate PASSED.")
-          EOF
+          print("SECURITY GATE : PASSED")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as f:
+                  f.write("## ✅ Security Gate Passed\n")
+                  f.write("No CRITICAL or HIGH findings remain.\n")
+          PY
