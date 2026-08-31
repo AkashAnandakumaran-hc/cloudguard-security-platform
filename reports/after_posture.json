@@ -1,0 +1,49 @@
+{
+  "label": "After",
+  "generated_at": "2026-08-31T02:49:00.130598+00:00",
+  "resource_count": 13,
+  "checks_passed": 45,
+  "checks_failed": 9,
+  "findings_by_severity": {
+    "LOW": 7,
+    "MEDIUM": 2
+  },
+  "posture_score": 96,
+  "top_risks": [
+    {
+      "check_id": "CKV_AWS_189",
+      "name": "CKV_AWS_189",
+      "severity": "MEDIUM",
+      "occurrences": 1,
+      "priority": "P2"
+    },
+    {
+      "check_id": "CKV2_AWS_62",
+      "name": "CKV2_AWS_62",
+      "severity": "LOW",
+      "occurrences": 2,
+      "priority": "P3"
+    },
+    {
+      "check_id": "CKV_AWS_144",
+      "name": "CKV_AWS_144",
+      "severity": "LOW",
+      "occurrences": 2,
+      "priority": "P3"
+    },
+    {
+      "check_id": "CKV_AWS_300",
+      "name": "CKV_AWS_300",
+      "severity": "LOW",
+      "occurrences": 1,
+      "priority": "P3"
+    },
+    {
+      "check_id": "CKV2_AWS_61",
+      "name": "CKV2_AWS_61",
+      "severity": "LOW",
+      "occurrences": 1,
+      "priority": "P3"
+    }
+  ]
+}

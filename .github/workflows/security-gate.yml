@@ -1,0 +1,68 @@
+name: CloudGuard Security Gate
+
+# Shift-left control: any pull request touching infrastructure code
+# is scanned before it can merge. CRITICAL or HIGH findings block
+# the deployment; MEDIUM/LOW are reported but non-blocking.
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/**"
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/**"
+
+jobs:
+  security-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov (IaC scan)
+        id: checkov
+        run: |
+          checkov -d infrastructure --compact --output json > checkov-results.json || true
+
+      - name: Run CloudGuard risk engine
+        run: |
+          python3 automation/risk_engine.py checkov-results.json \
+            --label "PR Scan" \
+            --out posture.json \
+            --md posture.md
+
+      - name: Upload posture report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudguard-posture-report
+          path: |
+            posture.json
+            posture.md
+
+      - name: Enforce security gate
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          report = json.load(open("posture.json"))
+          crit = report["findings_by_severity"].get("CRITICAL", 0)
+          high = report["findings_by_severity"].get("HIGH", 0)
+          score = report["posture_score"]
+
+          print(f"Posture score: {score}/100")
+          print(f"CRITICAL: {crit}  HIGH: {high}")
+
+          if crit > 0 or high > 0:
+              print("::error::Security gate FAILED - CRITICAL/HIGH findings must be remediated before merge.")
+              sys.exit(1)
+
+          print("Security gate PASSED.")
+          EOF
